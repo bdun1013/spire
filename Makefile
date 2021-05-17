@@ -102,6 +102,9 @@ go_bin_dir := $(go_dir)/bin
 go_url = https://storage.googleapis.com/golang/go$(go_version).$(os1)-$(arch2).tar.gz
 go_path := PATH="$(go_bin_dir):$(PATH)"
 
+GOARCH ?= $(call goenv,GOARCH)
+GOOS ?= $(call goenv,GOOS)
+
 golangci_lint_version = v1.39.0
 golangci_lint_dir = $(build_dir)/golangci_lint/$(golangci_lint_version)
 golangci_lint_bin = $(golangci_lint_dir)/golangci-lint
@@ -252,8 +255,8 @@ build: tidy bin/spire-server bin/spire-agent bin/k8s-workload-registrar bin/oidc
 define binary_rule
 .PHONY: $1
 $1: | go-check bin/
-	@echo Building $1...
-	$(E)$(go_path) go build $$(go_flags) -ldflags $$(go_ldflags) -o $1 $2
+	@echo Building $1 for $(GOOS)/$(GOARCH)...
+	$(E)$(go_path) GOOS=$(GOOS) GOARCH=$(GOARCH) go build $$(go_flags) -ldflags $$(go_ldflags) -o $1 $2
 endef
 
 # main SPIRE binaries
@@ -276,17 +279,26 @@ build-static: tidy bin/spire-server-static bin/spire-agent-static bin/k8s-worklo
 define binary_rule_static
 .PHONY: $1
 $1: | go-check bin/
-	@echo Building $1...
-	$(E)$(go_path) CGO_ENABLED=0 go build $$(go_flags) -ldflags $$(go_ldflags) -o $1 $2
+	@echo Building $1 for $(GOOS)/$(GOARCH)...
+	$(E)$(go_path) CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build $$(go_flags) -ldflags $$(go_ldflags) -o $1 $2
 
 endef
+
+AMD64_CC ?= gcc
+ARM64_CC ?= aarch64-linux-gnu-gcc
+
+ifeq ($(GOARCH), amd64)
+	CC := $(AMD64_CC)
+else ifeq ($(GOARCH), arm64)
+	CC := $(ARM64_CC)
+endif
+
 # https://7thzero.com/blog/golang-w-sqlite3-docker-scratch-image
 define binary_rule_external_static
 .PHONY: $1
 $1: | go-check bin/
-	@echo Building $1...
-	$(E)$(go_path) CGO_ENABLED=1 go build $$(go_flags) -ldflags '-s -w -linkmode external -extldflags "-static"' -o $1 $2
-
+	@echo Building $1 for $(GOOS)/$(GOARCH) using $(CC)...
+	$(E)$(go_path) CGO_ENABLED=1 GOOS=$(GOOS) GOARCH=$(GOARCH) CC=$(CC) go build $$(go_flags) -ldflags '-s -w -linkmode external -extldflags "-static"' -tags osusergo,netgo,sqlite_omit_load_extension -o $1 $2
 endef
 
 # static builds
@@ -331,55 +343,130 @@ artifact: build
 # Docker Images
 #############################################################################
 
+# TODO docker.io -> gcr.io
+REGISTRY ?= docker.io
+TAG ?= develop
+PLATFORMS ?= linux/arm64,linux/amd64
+CACHE_FROM_TAG ?=
+CACHE_FROM ?=
+
+define cache_from
+ifdef CACHE_FROM_TAG
+	CACHE_FROM := --cache-from type=registry,ref=$(REGISTRY)/boxboatbrian/$(1):$(CACHE_FROM_TAG)
+endif
+endef
+
+# TODO $(REGISTRY)/boxboatbrian -> $(REGISTRY)/spiffe-io
+
 .PHONY: images
 images: spire-server-image spire-agent-image k8s-workload-registrar-image oidc-discovery-provider-image
 
 .PHONY: spire-server-image
 spire-server-image: Dockerfile
-	docker build --build-arg goversion=$(go_version_full) --target spire-server -t spire-server .
-	docker tag spire-server:latest spire-server:latest-local
+	$(eval $(call cache_from,spire-server))
+	$(E)docker buildx build . \
+		--target spire-server \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		$(CACHE_FROM) \
+		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/spire-server:$(TAG)-cache,mode=max \
+		--tag $(REGISTRY)/boxboatbrian/spire-server:$(TAG) \
+		--push
 
 .PHONY: spire-agent-image
 spire-agent-image: Dockerfile
-	docker build --build-arg goversion=$(go_version_full) --target spire-agent -t spire-agent .
-	docker tag spire-agent:latest spire-agent:latest-local
+	$(eval $(call cache_from,spire-agent))
+	$(E)docker buildx build . \
+		--target spire-agent \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		$(CACHE_FROM) \
+		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/spire-agent:$(TAG)-cache,mode=max \
+		--tag $(REGISTRY)/boxboatbrian/spire-agent:$(TAG) \
+		--push
 
 .PHONY: k8s-workload-registrar-image
 k8s-workload-registrar-image: Dockerfile
-	docker build --build-arg goversion=$(go_version_full) --target k8s-workload-registrar -t k8s-workload-registrar .
-	docker tag k8s-workload-registrar:latest k8s-workload-registrar:latest-local
+	$(eval $(call cache_from,k8s-workload-registrar))
+	$(E)docker buildx build . \
+		--target k8s-workload-registrar \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		$(CACHE_FROM) \
+		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/k8s-workload-registrar:$(TAG)-cache,mode=max \
+		--tag $(REGISTRY)/boxboatbrian/k8s-workload-registrar:$(TAG) \
+		--push
 
 .PHONY: oidc-discovery-provider-image
 oidc-discovery-provider-image: Dockerfile
-	docker build --build-arg goversion=$(go_version_full) --target oidc-discovery-provider -t oidc-discovery-provider .
-	docker tag oidc-discovery-provider:latest oidc-discovery-provider:latest-local
+	$(eval $(call cache_from,oidc-discovery-provider))
+	$(E)docker buildx build . \
+		--target oidc-discovery-provider \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		$(CACHE_FROM) \
+		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/oidc-discovery-provider:$(TAG)-cache,mode=max \
+		--tag $(REGISTRY)/boxboatbrian/oidc-discovery-provider:$(TAG) \
+		--push
 
 #############################################################################
 # Docker Images FROM scratch
 #############################################################################
 
 .PHONY: scratch-images
-scratch-images: spire-server-scratch-image spire-agent-scratch-image k8s-workload-registrar-scratch-image
+scratch-images: spire-server-scratch-image spire-agent-scratch-image k8s-workload-registrar-scratch-image oidc-discovery-provider-scratch-image
 
 .PHONY: spire-server-scratch-image
 spire-server-scratch-image: Dockerfile
-	docker build --build-arg goversion=$(go_version_full) --target spire-server-scratch -t spire-server-scratch -f Dockerfile.scratch .
-	docker tag spire-server-scratch:latest spire-server-scratch:latest-local
+	$(eval $(call cache_from,spire-server))
+	$(E)docker buildx build . \
+		--target spire-server \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		$(CACHE_FROM) \
+		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/spire-agent:$(TAG)-scratch-cache,mode=max \
+		--tag $(REGISTRY)/boxboatbrian/spire-server:$(TAG)-scratch \
+		-f Dockerfile.scratch \
+		--push
 
 .PHONY: spire-agent-scratch-image
 spire-agent-scratch-image: Dockerfile
-	docker build --build-arg goversion=$(go_version_full) --target spire-agent-scratch -t spire-agent-scratch -f Dockerfile.scratch .
-	docker tag spire-agent-scratch:latest spire-agent-scratch:latest-local
+	$(eval $(call cache_from,spire-agent))
+	$(E)docker buildx build . \
+		--target spire-agent \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		$(CACHE_FROM) \
+		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/spire-agent:$(TAG)-scratch-cache,mode=max \
+		--tag $(REGISTRY)/boxboatbrian/spire-agent:$(TAG)-scratch \
+		-f Dockerfile.scratch \
+		--push
 
 .PHONY: k8s-workload-registrar-scratch-image
 k8s-workload-registrar-scratch-image: Dockerfile
-	docker build --build-arg goversion=$(go_version_full) --target k8s-workload-registrar-scratch -t k8s-workload-registrar-scratch -f Dockerfile.scratch .
-	docker tag k8s-workload-registrar-scratch:latest k8s-workload-registrar-scratch:latest-local
+	$(eval $(call cache_from,k8s-workload-registrar))
+	$(E)docker buildx build . \
+		--target k8s-workload-registrar \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		$(CACHE_FROM) \
+		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/k8s-workload-registrar:$(TAG)-scratch-cache,mode=max \
+		--tag $(REGISTRY)/boxboatbrian/k8s-workload-registrar:$(TAG)-scratch \
+		-f Dockerfile.scratch \
+		--push
 
 .PHONY: oidc-discovery-provider-scratch-image
 oidc-discovery-provider-scratch-image: Dockerfile
-	docker build --build-arg goversion=$(go_version_full) --target oidc-discovery-provider-scratch -t oidc-discovery-provider-scratch -f Dockerfile.scratch .
-	docker tag oidc-discovery-provider-scratch:latest oidc-discovery-provider-scratch:latest-local
+	$(eval $(call cache_from,oidc-discovery-provider))
+	$(E)docker buildx build . \
+		--target oidc-discovery-provider \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		$(CACHE_FROM) \
+		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/oidc-discovery-provider:$(TAG)-scratch-cache,mode=max \
+		--tag $(REGISTRY)/boxboatbrian/oidc-discovery-provider:$(TAG)-scratch \
+		-f Dockerfile.scratch \
+		--push
 
 #############################################################################
 # Code cleanliness

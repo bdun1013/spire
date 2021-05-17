@@ -1,6 +1,11 @@
-# Ignore build tools and cache
-.build*
-.cache
-bin/
-releases/
-artifacts/
+# Only include required files for Docker build
+*
+!go*
+!api/
+!cmd/
+!pkg/
+!proto/
+!support/
+!test/
+!Makefile
+!.go-version

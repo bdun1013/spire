@@ -91,14 +91,12 @@ jobs:
       - image: circleci/golang:<< pipeline.parameters.go-version >>
     resource_class: << pipeline.parameters.resource-class >>
     steps:
-      - setup_remote_docker: {}
+      - setup_remote_docker:
+          version: 20.10.2
       - checkout
-      - run: make images scratch-images
-      - run: docker save spire-server:latest-local spire-agent:latest-local k8s-workload-registrar:latest-local oidc-discovery-provider:latest-local spire-server-scratch:latest-local spire-agent-scratch:latest-local k8s-workload-registrar-scratch:latest-local | gzip > images.tar.gz
-      - persist_to_workspace:
-          root: ./
-          paths:
-            - images.tar.gz
+      - run: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_TOKEN} docker.io
+      - run: .circleci/docker-buildx-install.sh
+      - run: .circleci/publish-build-images.sh
 
   # Run the integration tests in parallel
   integration-test:
@@ -118,8 +116,9 @@ jobs:
           version: << pipeline.parameters.go-version >>
       - attach_workspace:
           at: /tmp/workspace
-      - run: zcat /tmp/workspace/images.tar.gz | docker load
       - checkout
+      - run: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_TOKEN} docker.io
+      - run: .circleci/pull-build-images.sh
       - run:
           name: Execute integration test suites
           command: |
@@ -135,11 +134,13 @@ jobs:
       - image: circleci/golang:<< pipeline.parameters.go-version >>
     resource_class: << pipeline.parameters.resource-class >>
     steps:
-      - setup_remote_docker: {}
+      - setup_remote_docker:
+          version: 20.10.2
       - attach_workspace:
           at: /tmp/workspace
-      - run: zcat /tmp/workspace/images.tar.gz | docker load
       - checkout
+      - run: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_TOKEN} docker.io
+      - run: .circleci/docker-buildx-install.sh
       - run: .circleci/publish-unstable-images.sh
 
   # Publish release docker images on GCR
@@ -150,8 +151,9 @@ jobs:
     steps:
       - attach_workspace:
           at: /tmp/workspace
-      - run: zcat /tmp/workspace/images.tar.gz | docker load
       - checkout
+      - run: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_TOKEN} docker.io
+      - run: .circleci/docker-buildx-install.sh
       - run: .circleci/publish-release-images.sh
 
   # Publish release artifacts on S3 and GitHub
@@ -227,8 +229,8 @@ workflows:
           filters:
             tags:
               only: /^v[0-9]+(\.[0-9]+)*$/
-            branches:
-              only: main  # Unstable images are only pushed from main
+            # branches:
+            #   only: main  # Unstable images are only pushed from main
           requires:
             - unit-test-linux
             - integration-test

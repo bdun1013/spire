@@ -1,15 +1,19 @@
 # Build stage
 ARG goversion
-FROM golang:${goversion}-alpine as builder
-RUN apk add build-base git mercurial
-ADD go.mod /spire/go.mod
-RUN cd /spire && go mod download
-ADD . /spire
+
+FROM --platform=${BUILDPLATFORM} golang:${goversion}-alpine as builder
+
 WORKDIR /spire
-RUN make build
+RUN apk add build-base git mercurial
+COPY go.mod go.sum /spire/
+RUN go mod download
+COPY . /spire/
+ARG TARGETOS
+ARG TARGETARCH
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make build
 
 # Common base
-FROM alpine AS spire-base
+FROM --platform=${TARGETPLATFORM} alpine AS spire-base
 RUN apk --no-cache add dumb-init
 RUN apk --no-cache add ca-certificates
 RUN mkdir -p /opt/spire/bin

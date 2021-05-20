@@ -350,62 +350,64 @@ PLATFORMS ?= linux/arm64,linux/amd64
 CACHE_FROM_TAG ?=
 CACHE_FROM ?=
 
-define cache_from
 ifdef CACHE_FROM_TAG
-	CACHE_FROM := --cache-from type=registry,ref=$(REGISTRY)/boxboatbrian/$(1):$(CACHE_FROM_TAG)
+	CACHE_FROM := --cache-from $(REGISTRY)/boxboatbrian/spire-builder:$(CACHE_FROM_TAG)
 endif
-endef
 
 # TODO $(REGISTRY)/boxboatbrian -> $(REGISTRY)/spiffe-io
+
+.PHONE: builder-image
+builder-image: Dockerfile
+	$(E)docker buildx build . \
+		--target builder \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--cache-from $(REGISTRY)/boxboatbrian/spire-builder:cache \
+		--tag $(REGISTRY)/boxboatbrian/spire-builder:$(TAG) \
+		--tag $(REGISTRY)/boxboatbrian/spire-builder:cache \
+		--push
 
 .PHONY: images
 images: spire-server-image spire-agent-image k8s-workload-registrar-image oidc-discovery-provider-image
 
 .PHONY: spire-server-image
 spire-server-image: Dockerfile
-	$(eval $(call cache_from,spire-server))
 	$(E)docker buildx build . \
 		--target spire-server \
 		--platform $(PLATFORMS) \
 		--build-arg goversion=$(go_version_full) \
 		$(CACHE_FROM) \
-		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/spire-server:$(TAG)-cache,mode=max \
 		--tag $(REGISTRY)/boxboatbrian/spire-server:$(TAG) \
 		--push
 
 .PHONY: spire-agent-image
 spire-agent-image: Dockerfile
-	$(eval $(call cache_from,spire-agent))
 	$(E)docker buildx build . \
 		--target spire-agent \
 		--platform $(PLATFORMS) \
 		--build-arg goversion=$(go_version_full) \
 		$(CACHE_FROM) \
-		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/spire-agent:$(TAG)-cache,mode=max \
 		--tag $(REGISTRY)/boxboatbrian/spire-agent:$(TAG) \
 		--push
 
 .PHONY: k8s-workload-registrar-image
 k8s-workload-registrar-image: Dockerfile
-	$(eval $(call cache_from,k8s-workload-registrar))
 	$(E)docker buildx build . \
 		--target k8s-workload-registrar \
 		--platform $(PLATFORMS) \
 		--build-arg goversion=$(go_version_full) \
 		$(CACHE_FROM) \
-		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/k8s-workload-registrar:$(TAG)-cache,mode=max \
 		--tag $(REGISTRY)/boxboatbrian/k8s-workload-registrar:$(TAG) \
 		--push
 
 .PHONY: oidc-discovery-provider-image
 oidc-discovery-provider-image: Dockerfile
-	$(eval $(call cache_from,oidc-discovery-provider))
 	$(E)docker buildx build . \
 		--target oidc-discovery-provider \
 		--platform $(PLATFORMS) \
 		--build-arg goversion=$(go_version_full) \
 		$(CACHE_FROM) \
-		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/oidc-discovery-provider:$(TAG)-cache,mode=max \
 		--tag $(REGISTRY)/boxboatbrian/oidc-discovery-provider:$(TAG) \
 		--push
 
@@ -413,59 +415,64 @@ oidc-discovery-provider-image: Dockerfile
 # Docker Images FROM scratch
 #############################################################################
 
+.PHONE: builder-image-scratch
+builder-image-scratch: Dockerfile
+	$(E)docker buildx build . \
+		--target builder \
+		--platform $(PLATFORMS) \
+		--build-arg goversion=$(go_version_full) \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--cache-from $(REGISTRY)/boxboatbrian/spire-builder:cache-scratch \
+		--tag $(REGISTRY)/boxboatbrian/spire-builder:$(TAG)-scratch \
+		--tag $(REGISTRY)/boxboatbrian/spire-builder:cache-scratch \
+		--file Dockerfile.scratch \
+		--push
+
 .PHONY: scratch-images
 scratch-images: spire-server-scratch-image spire-agent-scratch-image k8s-workload-registrar-scratch-image oidc-discovery-provider-scratch-image
 
 .PHONY: spire-server-scratch-image
 spire-server-scratch-image: Dockerfile
-	$(eval $(call cache_from,spire-server))
 	$(E)docker buildx build . \
 		--target spire-server \
 		--platform $(PLATFORMS) \
 		--build-arg goversion=$(go_version_full) \
 		$(CACHE_FROM) \
-		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/spire-agent:$(TAG)-scratch-cache,mode=max \
 		--tag $(REGISTRY)/boxboatbrian/spire-server:$(TAG)-scratch \
-		-f Dockerfile.scratch \
+		--file Dockerfile.scratch \
 		--push
 
 .PHONY: spire-agent-scratch-image
 spire-agent-scratch-image: Dockerfile
-	$(eval $(call cache_from,spire-agent))
 	$(E)docker buildx build . \
 		--target spire-agent \
 		--platform $(PLATFORMS) \
 		--build-arg goversion=$(go_version_full) \
 		$(CACHE_FROM) \
-		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/spire-agent:$(TAG)-scratch-cache,mode=max \
 		--tag $(REGISTRY)/boxboatbrian/spire-agent:$(TAG)-scratch \
-		-f Dockerfile.scratch \
+		--file Dockerfile.scratch \
 		--push
 
 .PHONY: k8s-workload-registrar-scratch-image
 k8s-workload-registrar-scratch-image: Dockerfile
-	$(eval $(call cache_from,k8s-workload-registrar))
 	$(E)docker buildx build . \
 		--target k8s-workload-registrar \
 		--platform $(PLATFORMS) \
 		--build-arg goversion=$(go_version_full) \
 		$(CACHE_FROM) \
-		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/k8s-workload-registrar:$(TAG)-scratch-cache,mode=max \
 		--tag $(REGISTRY)/boxboatbrian/k8s-workload-registrar:$(TAG)-scratch \
-		-f Dockerfile.scratch \
+		--file Dockerfile.scratch \
 		--push
 
 .PHONY: oidc-discovery-provider-scratch-image
 oidc-discovery-provider-scratch-image: Dockerfile
-	$(eval $(call cache_from,oidc-discovery-provider))
 	$(E)docker buildx build . \
 		--target oidc-discovery-provider \
 		--platform $(PLATFORMS) \
 		--build-arg goversion=$(go_version_full) \
 		$(CACHE_FROM) \
-		--cache-to type=registry,ref=$(REGISTRY)/boxboatbrian/oidc-discovery-provider:$(TAG)-scratch-cache,mode=max \
 		--tag $(REGISTRY)/boxboatbrian/oidc-discovery-provider:$(TAG)-scratch \
-		-f Dockerfile.scratch \
+		--file Dockerfile.scratch \
 		--push
 
 #############################################################################
@@ -572,7 +579,7 @@ mockgen: $(foreach x,$(mockgen_mocks),$(call mockgen-out,$x))
 .PHONY: dev-shell dev-image
 
 dev-image:
-	$(E)docker build -t spire-dev -f Dockerfile.dev .
+	$(E)docker build -t spire-dev --file Dockerfile.dev .
 
 dev-shell: | go-check
 	$(E)docker run --rm -v "$(call goenv,GOCACHE)":/root/.cache/go-build -v "$(DIR):/spire" -v "$(call goenv,GOPATH)/pkg/mod":/root/go/pkg/mod -it -h spire-dev spire-dev
